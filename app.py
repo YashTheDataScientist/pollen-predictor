@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import joblib
 import requests
+import os
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -9,7 +10,7 @@ app = Flask(__name__)
 # Load your model
 model = joblib.load('pollen_risk_model.pkl')
 
-# Load your suburb density csv
+# Load your suburb density CSV
 suburb_master_df = pd.read_csv('suburb_plant_density.csv')
 suburb_master_df['suburb'] = suburb_master_df['suburb'].str.strip().str.lower()
 
@@ -26,7 +27,10 @@ def predict():
         return jsonify({'error': 'Missing suburb, latitude or longitude'}), 400
 
     # Fetch live weather from Open-Meteo
-    weather_params = ",".join(['temperature_2m', 'dew_point_2m', 'relative_humidity_2m', 'wind_speed_10m', 'cloud_cover', 'surface_pressure'])
+    weather_params = ",".join([
+        'temperature_2m', 'dew_point_2m', 'relative_humidity_2m',
+        'wind_speed_10m', 'cloud_cover', 'surface_pressure'
+    ])
     weather_url = "https://api.open-meteo.com/v1/forecast"
 
     params = {
@@ -58,13 +62,13 @@ def predict():
     else:
         plant_density = matched.iloc[0]['local_density_score']
 
-
     # Make prediction
-    features = [[temp, wind_speed, plant_density] + [0]*7]
-
+    features = [[temp, wind_speed, plant_density] + [0] * 7]  # padding to 10 features
     prediction = model.predict(features)[0]
 
     return jsonify({'predicted_pollen_risk': int(prediction)})
 
+# Run the app
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
