@@ -2,42 +2,38 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import joblib
 import requests
+from datetime import datetime
 import os
 
-# Initialize Flask app
 app = Flask(__name__)
 
-# Load your model
-model = joblib.load('pollen_risk_model.pkl')
+# Load the trained balanced model
+model = joblib.load('pollen_risk_model_balanced.pkl')
 
-# Load your suburb density CSV
-suburb_master_df = pd.read_csv('suburb_plant_density.csv')
-suburb_master_df['suburb'] = suburb_master_df['suburb'].str.strip().str.lower()
+# Load suburb data with lat/lon and density info
+suburb_df = pd.read_csv('suburb_plant_density.csv')
+suburb_df['suburb'] = suburb_df['suburb'].str.strip().str.lower()
 
-# Define the prediction route
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.get_json()
+    suburb_input = data.get('suburb', '').strip().lower()
 
-    suburb_name = data.get('suburb')
-    latitude = data.get('latitude')
-    longitude = data.get('longitude')
+    # Validate suburb
+    matched = suburb_df[suburb_df['suburb'] == suburb_input]
+    if matched.empty:
+        return jsonify({'error': f"Suburb '{suburb_input}' not found"}), 404
 
-    if not suburb_name or latitude is None or longitude is None:
-        return jsonify({'error': 'Missing suburb, latitude or longitude'}), 400
+    lat = matched.iloc[0]['latitude']
+    lon = matched.iloc[0]['longitude']
 
-    # Fetch live weather from Open-Meteo
-    weather_params = ",".join([
-        'temperature_2m', 'dew_point_2m', 'relative_humidity_2m',
-        'wind_speed_10m', 'cloud_cover', 'surface_pressure'
-    ])
+    # Open-Meteo API call
     weather_url = "https://api.open-meteo.com/v1/forecast"
-
     params = {
-        'latitude': latitude,
-        'longitude': longitude,
+        'latitude': lat,
+        'longitude': lon,
+        'hourly': 'temperature_2m,dew_point_2m,relative_humidity_2m,cloud_cover,wind_speed_10m',
         'current_weather': True,
-        'hourly': weather_params,
         'timezone': 'auto'
     }
 
@@ -47,28 +43,50 @@ def predict():
     except Exception as e:
         return jsonify({'error': f'Weather API failed: {str(e)}'}), 500
 
-    # Extract necessary weather features
-    current_weather = weather_data.get('current_weather', {})
-    if not current_weather:
-        return jsonify({'error': 'No weather data found'}), 500
+    current = weather_data.get('current_weather', {})
+    hourly = weather_data.get('hourly', {})
 
-    temp = current_weather.get('temperature')
-    wind_speed = current_weather.get('windspeed')
+    if not current or not hourly:
+        return jsonify({'error': 'Missing weather data'}), 500
 
-    # Find plant density for the suburb
-    matched = suburb_master_df[suburb_master_df['suburb'] == suburb_name.strip().lower()]
-    if matched.empty:
-        plant_density = 0
-    else:
-        plant_density = matched.iloc[0]['local_density_score']
+    timestamp = current.get('time')
+    try:
+        idx = hourly['time'].index(timestamp)
+        temp = hourly['temperature_2m'][idx]
+        dewpoint = hourly['dew_point_2m'][idx]
+        humidity = hourly['relative_humidity_2m'][idx]
+        wind_speed = hourly['wind_speed_10m'][idx]
+        cloud_cover = hourly['cloud_cover'][idx]
+    except Exception as e:
+        return jsonify({'error': f'Could not align timestamp: {str(e)}'}), 500
 
-    # Make prediction
-    features = [[temp, wind_speed, plant_density] + [0] * 7]  # padding to 10 features
+    # Prepare input for prediction
+    month = datetime.now().month
+    features = pd.DataFrame([{
+        'temperature': temp,
+        'dewpoint_temperature': dewpoint,
+        'wind_speed': wind_speed,
+        'relative_humidity': humidity,
+        'total_cloud_cover': cloud_cover,
+        'month': month
+    }])
+
     prediction = model.predict(features)[0]
 
-    return jsonify({'predicted_pollen_risk': int(prediction)})
+    return jsonify({
+        'suburb': suburb_input.title(),
+        'predicted_pollen_risk': int(prediction),
+        'features_used': {
+            'temperature': temp,
+            'dewpoint_temperature': dewpoint,
+            'relative_humidity': humidity,
+            'wind_speed': wind_speed,
+            'total_cloud_cover': cloud_cover,
+            'month': month
+        }
+    })
 
-# Run the app
+# Run app locally
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
