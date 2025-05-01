@@ -1,6 +1,7 @@
+flask==2.3.3
+flask-cors==5.0.1
+pandas
+requests
 scikit-learn==1.6.1
 imbalanced-learn==0.13.0
 joblib
-pandas
-requests
-flask

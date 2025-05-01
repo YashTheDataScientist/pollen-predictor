@@ -4,9 +4,12 @@ import joblib
 import requests
 import os
 from datetime import datetime
+from flask_cors import CORS
+
 
 # Initialize Flask app
 app = Flask(__name__)
+CORS(app)
 
 # Load your trained model
 model = joblib.load('pollen_risk_model_balanced_new.pkl')
