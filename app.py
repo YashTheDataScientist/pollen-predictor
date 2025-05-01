@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 
 # Load the trained balanced model
-model = joblib.load('pollen_risk_model_balanced.pkl')
+model = joblib.load('pollen_risk_model_balanced_new.pkl')
 
 # Load suburb data with lat/lon and density info
 suburb_df = pd.read_csv('suburb_plant_density.csv')
